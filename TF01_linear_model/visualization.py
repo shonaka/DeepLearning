@@ -63,3 +63,5 @@ def plt_image_labels(images, image_shape, num_row, num_col, class_labels, class_
         # Remove ticks from the plot
         ax.set_xticks([])
         ax.set_yticks([])
+
+    fig.show()
