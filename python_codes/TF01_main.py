@@ -20,7 +20,7 @@
     **********************************************************************************
     Author:     Sho Nakagome
     Date:       1/10/18
-    File:       main
+    File:       TF01_main
     Comments:   This is the main file to run linear model based classification on
                 fashion MNIST: https://github.com/zalandoresearch/fashion-mnist
     ToDo:       * Implement Tensorboard to visualize learning process results
@@ -36,7 +36,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Specify data path
-LOG_FOLDER = '../tensorflow_logs'
+LOG_FOLDER = '../TF01/tensorflow_logs'
 
 # ===== Define global variables =====
 # Image related
@@ -61,11 +61,15 @@ LABELS = ['t_shirt_top',  # 0
 # Optimization related
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 50
-NUM_EPOCHS = 500
+NUM_EPOCHS = 2000
 # ===================================
 
 
 def main():
+
+    # # Show the current version of tensorflow
+    print(tf.__version__)
+
 
     # # 1) Import and sort data
     from tensorflow.examples.tutorials.mnist import input_data
