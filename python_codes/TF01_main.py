@@ -36,7 +36,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Specify data path
-LOG_FOLDER = '../TF01/tensorflow_logs'
+LOG_FOLDER = '../tensorflow_logs/TF01'
 
 # ===== Define global variables =====
 # Image related

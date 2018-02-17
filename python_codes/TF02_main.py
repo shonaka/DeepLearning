@@ -19,7 +19,7 @@
 
     **********************************************************************************
     Author:     Sho Nakagome
-    Date:       2/02/18
+    Date:       2/15/18
     File:       TF02_main
     Comments:   This is the main file to run a simple CNN model based classification on
                 fashion MNIST: https://github.com/zalandoresearch/fashion-mnist
@@ -31,12 +31,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from visualization import plt_image_labels
+from cnn_ops import new_weights, new_conv, new_fc
 # For Pycharm IDE, avoiding a certain warning when using GPU computing
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Specify data path
-LOG_FOLDER = '../TF02/tensorflow_logs'
+LOG_FOLDER = '../tensorflow_logs/TF02'
 
 # ===== Define global variables =====
 # Image related
@@ -62,7 +63,9 @@ LABELS = ['t_shirt_top',  # 0
 # Optimization related
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 64  # Better to have a batch size 2^n
-NUM_EPOCHS = BATCH_SIZE * 10
+NUM_EPOCHS = 20  # How many times you go through the entire dataset
+# Visualization related
+DISPLAY_FREQ = BATCH_SIZE
 # CNN related
 # Number of channels
 NUM_CHANNELS = 1  # Since we are using gray-scale
@@ -72,70 +75,17 @@ NUM_FILTERS1 = 20
 # 2nd CNN layer info
 FILTER_SIZE2 = 10
 NUM_FILTERS2 = 20
-# Last fully-connected layer info
-FC_SIZE = 128
 # ===================================
-
-
-# Some helper functions to construct a simple CNN
-def new_weights(name, shape):
-    """
-    Defining a new weights based on the name and the shape.
-    Initialized with Xavier initializer
-
-    :param name: name of the new defined weights
-    :param shape: shape of the new defined filter
-    """
-
-    W = tf.get_variable(name=name, shape=shape, initializer=tf.contrib.layers.xavier_initializer())
-
-    return W
-
-def simpleCNN(X):
-    """
-    Plot images with true labels. If specified, predicted class too.
-
-    :param images: the image data itself, containing pixel data.
-    :param num_row: how many number of rows you want to plot.
-    :param num_col: how many number of columns you want to plot.
-    :param class_true: the true class labels for the images you give as the first input.
-    :param class_pred: the predicted class labels. If not specified, it does not plot the labels.
-    """
-
-    # Get new weights
-    W1 = new_weights("W1", [FILTER_SIZE1, FILTER_SIZE1, NUM_CHANNELS, NUM_FILTERS1])
-    W2 = new_weights("W2", [FILTER_SIZE2, FILTER_SIZE2, NUM_FILTERS1, NUM_FILTERS2])
-
-    # CONV2D: Define your first CNN layer
-    Z1 = tf.nn.conv2d(input=X,
-                      filter=W1,
-                      strides=[1, 1, 1, 1],
-                      padding='SAME')
-    # RELU
-    A1 = tf.nn.relu(Z1)
-    # CONV2D: 2nd CNN layer
-    Z2 = tf.nn.conv2d(input=A1,
-                      filter=W2,
-                      strides=[1, 1, 1, 1],
-                      padding='SAME')
-    # RELU
-    A2 = tf.nn.relu(Z2)
-    # FLATTEN (from a convolutional volume, we are flatting it out to a single vector like layer)
-    P = tf.contrib.layers.flatten(A2)
-    # FULLY-CONNECTED layer
-    # We have 10 neurons in the output layer because we have 10 classes to classify.
-    final_output = tf.contrib.layers.fully_connected(P, 10, activation_fn=None)
-
-    return final_output
 
 
 
 def main():
 
     # # Show the current version of tensorflow
-    print(tf.__version__)
+    print("Tensorflow version: ", tf.__version__)
 
     # # 1) Import and sort data
+    print("\nImporting data...\n")
     from tensorflow.examples.tutorials.mnist import input_data
 
     data = input_data.read_data_sets('data/fashion',
@@ -167,97 +117,104 @@ def main():
     graph = tf.Graph()
     with graph.as_default():
         # Define place holders. These are where your input and output goes when actually computing.
-        X = tf.placeholder(tf.float32, shape=[None, IMG_TOT], name="X")
-        X_image = tf.reshape(X, [-1, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS])
-        Y = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="Y")
-        Y_true_class = tf.argmax(Y, axis=1, name="Y_true_class")
+        with tf.name_scope('Inputs'):
+            X = tf.placeholder(tf.float32, shape=[None, IMG_TOT], name="X")
+            X_image = tf.reshape(X, [-1, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS])
+            Y = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="Y")
+            Y_true_class = tf.argmax(Y, axis=1, name="Y_true_class")
+            # Pass images to tensorboard for visualization (only 3 images)
+            tf.summary.image('input_images', X_image, 3)
 
-        # Defining a simple CNN model using the function defined before
-        model = simpleCNN(X_image)
+        # Defining a simple CNN model using functions defined before
+        with tf.name_scope('Model'):
+            # shape of the first layer's filter
+            shape1 = [FILTER_SIZE1, FILTER_SIZE1, NUM_CHANNELS, NUM_FILTERS1]
+            # make the first layer
+            conv1 = new_conv(X_image, shape1, 'conv1')
+            # shape of the second layer's filter
+            shape2 = [FILTER_SIZE2, FILTER_SIZE2, NUM_FILTERS1, NUM_FILTERS2]
+            # make the second layer
+            conv2 = new_conv(conv1, shape2, 'conv2')
+            # add to fully-connected layer
+            model = new_fc(conv2, 'output_layer', NUM_CLASSES)
+            # Use softmax layer to normalize the output and then get the highest number to determine the class
+            Y_pred = tf.nn.softmax(model)
+            Y_pred_class = tf.argmax(Y_pred, axis=1)
 
-        # Use softmax layer to normalize the output and then get the highest number to determine the class
-        Y_pred = tf.nn.softmax(model)
-        Y_pred_class = tf.argmax(Y_pred, axis=1)
+        # Define loss function
+        with tf.name_scope('Loss'):
+            # Using cross entropy to calculate the loss
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=model, labels=Y), name="cross_entropy")
+            # Log loss in tensorboard
+            tf.summary.scalar('loss', loss)
 
-        # Define loss function. Least squared error
-        cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=model, labels=Y),
-                              name="cross_entropy")
+        with tf.name_scope('Optimizer'):
+            # Here we are using the Adam optimizer
+            optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE, name='Adam_optimizer').minimize(loss)
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE)
-        global_step = tf.train.get_or_create_global_step(graph)
-        training_operation = optimizer.minimize(cost,
-                                                global_step=global_step,
-                                                name='minimizer')
-
-        correct_prediction = tf.equal(Y_pred_class, Y_true_class)
-        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-        # Attach summary writers (for tensorboard):
-        with tf.name_scope("train") as scope:
-            loss_train = tf.summary.scalar('train_loss', cost)
-            acc_summary_train = tf.summary.scalar('train_acc', accuracy)
-        with tf.name_scope("validate") as scope:
-            loss_val = tf.summary.scalar('validation_loss', cost)
-            acc_summary_val = tf.summary.scalar('validation_acc', accuracy)
-        writer = tf.summary.FileWriter(LOG_FOLDER, graph)
+        with tf.name_scope('Accuracy'):
+            # Calculating the accuracy by comparing with the true labels
+            correct_prediction = tf.equal(Y_pred_class, Y_true_class)
+            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+            # Log accuracy in tensorboard
+            tf.summary.scalar('accuracy', accuracy)
 
         # # 3) Running tensorflow session
         # Make sure that you never call this before creating a model
         # since it requires that you have defined a graph already.
         init = tf.global_variables_initializer()
 
+        # merge all the summaries for tensorboard
+        merged = tf.summary.merge_all()
+
         # Running a tensorflow session
         with tf.Session() as sess:
+            print("-------------------------------")
             print("Initializing all the variables.")
             sess.run(init)
+            writer = tf.summary.FileWriter(LOG_FOLDER, graph)
+            # Calculate the number of iterations needed based on your batch size
+            num_iteration = int(len(data.train.labels) / BATCH_SIZE)
+            # Define global step: a way to keep track of your trained samples over multiple epochs
+            global_step = 0
+            global_step_val = 0
 
             print("Start training.")
-            for i in range(NUM_EPOCHS):
-                # Get a batch of training samples. Every time this is called within a loop,
-                # it gets the next batch.
-                x_batch, y_batch = data.train.next_batch(BATCH_SIZE)
+            for epoch in range(NUM_EPOCHS):
+                print("Training epochs: {}".format(epoch))
+                for i in range(num_iteration):
+                    # Get a batch of training samples. Every time this is called within a loop,
+                    # it gets the next batch.
+                    x_batch, y_batch = data.train.next_batch(BATCH_SIZE)
+                    global_step += 1
+
+                    # Create a dictionary with batched samples. This will go into the optimizer to train the model.
+                    feed_dict_train = {X: x_batch, Y: y_batch}
+
+                    # Run the optimization with tensorboard summary
+                    _, train_summary = sess.run([optimizer, merged], feed_dict=feed_dict_train)
+
+                    # Show loss and accuracy with a certain display frequency
+                    if i % DISPLAY_FREQ == 0:
+                        train_batch_loss, train_batch_acc = sess.run([loss, accuracy], feed_dict=feed_dict_train)
+                        print("iter {0:3d}:\t Loss={1:.2f},\tTraining accuracy={2:.01%}".format(i,
+                                                                                                train_batch_loss,
+                                                                                                train_batch_acc))
+                    # log results
+                    writer.add_summary(train_summary, global_step)
+
+                # Run validation after every epoch
                 x_batch_val, y_batch_val = data.validation.next_batch(BATCH_SIZE)
-
-                # Create a dict with batched samples. This will go into the optimizer to train the model.
-                feed_dict_train = {X: x_batch, Y: y_batch}
-                feed_dict_validation = {X: x_batch_val, Y: y_batch_val}
-
-                # Run the optimization and calculate the loss
-                result_l, train_loss_summary, _ = \
-                    sess.run([cost, loss_train, training_operation], feed_dict=feed_dict_train)
-                mean_loss = np.mean(result_l)
-
-                # Also calculate the training accuracy
-                y_batch_class = np.array([label.argmax() for label in y_batch])
-                feed_dict_train_no_one_hot = {X: x_batch, Y_true_class: y_batch_class}
-                acc_train, train_acc_summary = \
-                    sess.run([accuracy, acc_summary_train], feed_dict=feed_dict_train_no_one_hot)
-
-                # log results
-                writer.add_summary(train_loss_summary, i)
-                writer.add_summary(train_acc_summary, i)
-
-                # Do the same for the validation set
-                result_l_val, val_loss_summary, _ = \
-                    sess.run([cost, loss_val, training_operation], feed_dict=feed_dict_validation)
-                mean_loss_val = np.mean(result_l_val)
-
-                y_batch_class_val = np.array([label.argmax() for label in y_batch_val])
-                feed_dict_val_no_one_hot = {X: x_batch_val, Y_true_class: y_batch_class_val}
-                acc_train, val_acc_summary = \
-                    sess.run([accuracy, acc_summary_val], feed_dict=feed_dict_val_no_one_hot)
-
-                writer.add_summary(val_loss_summary, i)
-                writer.add_summary(val_acc_summary, i)
-
-                # Print the loss and the training accuracy every 10 iteration
-                # Detailed logs will be displayed in tensorboard
-                if i % BATCH_SIZE == 0:
-                    print("Loss function: %.4f" % mean_loss)
-                    print("Training accuracy: {0:>6.1%}".format(acc_train))
+                global_step_val += 1
+                feed_dict_val = {X: x_batch_val, Y: y_batch_val}
+                val_batch_loss, val_batch_acc = sess.run([loss, accuracy], feed_dict=feed_dict_val)
+                print("Epoch: {0},\t Validation Loss: {1:.2f},\tValidation Accuracy: {2:.01%}".format(epoch+1,
+                                                                                                      val_batch_loss,
+                                                                                                      val_batch_acc))
+                print("-----------------------------------")
 
             print("Training finished.")
-
+            print("------------------")
             print("\nStart testing.")
             # We are going to feed all the test samples
             feed_dict_test = {X: data.test.images,
@@ -269,7 +226,9 @@ def main():
                                                    feed_dict=feed_dict_test)
 
         # Print the accuracy
+        print("----------------------------------")
         print("Test accuracy: {0:.1%}".format(acc))
+        print("----------------------------------")
 
 
 if __name__ == '__main__':
