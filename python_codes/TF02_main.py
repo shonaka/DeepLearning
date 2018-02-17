@@ -63,7 +63,7 @@ LABELS = ['t_shirt_top',  # 0
 # Optimization related
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 64  # Better to have a batch size 2^n
-NUM_EPOCHS = 20  # How many times you go through the entire dataset
+NUM_EPOCHS = 10  # How many times you go through the entire dataset
 # Visualization related
 DISPLAY_FREQ = BATCH_SIZE
 # CNN related
@@ -172,12 +172,12 @@ def main():
             print("-------------------------------")
             print("Initializing all the variables.")
             sess.run(init)
-            writer = tf.summary.FileWriter(LOG_FOLDER, graph)
+            writer = tf.summary.FileWriter(LOG_FOLDER + "/train", graph)
+            writer_val = tf.summary.FileWriter(LOG_FOLDER + "/validation", graph)
             # Calculate the number of iterations needed based on your batch size
             num_iteration = int(len(data.train.labels) / BATCH_SIZE)
             # Define global step: a way to keep track of your trained samples over multiple epochs
             global_step = 0
-            global_step_val = 0
 
             print("Start training.")
             for epoch in range(NUM_EPOCHS):
@@ -197,21 +197,23 @@ def main():
                     # Show loss and accuracy with a certain display frequency
                     if i % DISPLAY_FREQ == 0:
                         train_batch_loss, train_batch_acc = sess.run([loss, accuracy], feed_dict=feed_dict_train)
-                        print("iter {0:3d}:\t Loss={1:.2f},\tTraining accuracy={2:.01%}".format(i,
+                        print("iter {0:3d}:\t Loss={1:.2f},\tTraining accuracy=\t{2:.01%}".format(i,
                                                                                                 train_batch_loss,
                                                                                                 train_batch_acc))
                     # log results
                     writer.add_summary(train_summary, global_step)
 
-                # Run validation after every epoch
-                x_batch_val, y_batch_val = data.validation.next_batch(BATCH_SIZE)
-                global_step_val += 1
-                feed_dict_val = {X: x_batch_val, Y: y_batch_val}
-                val_batch_loss, val_batch_acc = sess.run([loss, accuracy], feed_dict=feed_dict_val)
-                print("Epoch: {0},\t Validation Loss: {1:.2f},\tValidation Accuracy: {2:.01%}".format(epoch+1,
-                                                                                                      val_batch_loss,
-                                                                                                      val_batch_acc))
-                print("-----------------------------------")
+                    # Also run validation
+                    x_batch_val, y_batch_val = data.validation.next_batch(BATCH_SIZE)
+                    feed_dict_val = {X: x_batch_val, Y: y_batch_val}
+                    val_batch_loss, val_batch_acc, val_summary = sess.run([loss, accuracy, merged], feed_dict=feed_dict_val)
+                    writer_val.add_summary(val_summary, global_step)
+                    if i % DISPLAY_FREQ == 0:
+                        print("iter {0:3d}:\t Loss={1:.2f},\tValidation accuracy=\t{2:.01%}".format(i,
+                                                                                                val_batch_loss,
+                                                                                                val_batch_acc))
+                # Just for better visualization on logs
+                print("------------------------------")
 
             print("Training finished.")
             print("------------------")
@@ -224,6 +226,9 @@ def main():
             # Calculate the accuracy
             acc, true_label, pred_label = sess.run([accuracy, correct_prediction, Y_pred_class],
                                                    feed_dict=feed_dict_test)
+
+            # Close tensorflow session
+            sess.close()
 
         # Print the accuracy
         print("----------------------------------")
