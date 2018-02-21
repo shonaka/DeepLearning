@@ -74,7 +74,7 @@ def main():
     # # 1) Import and sort data
     from tensorflow.examples.tutorials.mnist import input_data
 
-    data = input_data.read_data_sets('data/fashion',
+    data = input_data.read_data_sets('../data/fashion',
                                      source_url='http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/',
                                      one_hot=True)
     # Define another class labels where the true class is indicated by the integer values
