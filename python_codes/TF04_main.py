@@ -29,7 +29,6 @@
 import tensorflow as tf
 import numpy as np
 import pandas as pd
-from PIL import Image
 from subprocess import check_output
 from cnn_ops import *
 # For Pycharm IDE, avoiding a certain warning when using GPU computing
