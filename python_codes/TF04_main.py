@@ -44,8 +44,8 @@ TEST_PATH = '../data/plant_seedlings_classification/test'
 
 # ===== Define global variables =====
 # Image related (resizing image dimensions)
-IMG_HEIGHT = 32
 IMG_WIDTH = 32
+IMG_HEIGHT = 32
 
 # Number of classes
 NUM_CLASS = 12
@@ -76,8 +76,14 @@ def input_parser(img_path, label):
     # read the image from file
     img_file = tf.read_file(img_path)
 
-    img_decoded = tf.image.decode_png(img_file, channels=NUM_CHANNELS)
+    # there's decode_png and decode_jpeg but this one is more robust
+    # one downside is that you need the next line to assign shape
+    img_decoded = tf.image.decode_image(img_file, channels=NUM_CHANNELS)
 
+    # you need this line if you use decode_image because it won't assign shape for you
+    img_decoded.set_shape([None, None, None])
+
+    # reshape to your intended image size
     img_resized = tf.image.resize_images(img_decoded, [IMG_HEIGHT, IMG_WIDTH])
 
     return img_resized, one_hot
@@ -132,7 +138,7 @@ def main():
     with graph.as_default():
         # Define place holders. These are where your input and output goes when actually computing.
         with tf.name_scope('Inputs'):
-            X_image = tf.placeholder(tf.float32, shape=[None, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS], name="X")
+            X_image = tf.placeholder(tf.float32, shape=[None, IMG_WIDTH, IMG_HEIGHT, NUM_CHANNELS], name="X")
             Y = tf.placeholder(tf.float32, [None, NUM_CLASS], name="Y")
             Y_true_class = tf.argmax(Y, axis=1, name="Y_true_class")
             # Pass images to tensorboard for visualization (only 3 images)

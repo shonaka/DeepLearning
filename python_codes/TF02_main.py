@@ -41,11 +41,11 @@ LOG_FOLDER = '../tensorflow_logs/TF02'
 
 # ===== Define global variables =====
 # Image related
-IMG_HEIGHT = 28
 IMG_WIDTH = 28
+IMG_HEIGHT = 28
 # total number of pixels in an image
-IMG_TOT = IMG_HEIGHT * IMG_WIDTH
-IMG_SHAPE = (IMG_HEIGHT, IMG_WIDTH)
+IMG_TOT = IMG_WIDTH * IMG_HEIGHT
+IMG_SHAPE = (IMG_WIDTH, IMG_HEIGHT)
 # number of classes
 NUM_CLASSES = 10
 # labels corresponding to the numbers
@@ -119,7 +119,7 @@ def main():
         # Define place holders. These are where your input and output goes when actually computing.
         with tf.name_scope('Inputs'):
             X = tf.placeholder(tf.float32, shape=[None, IMG_TOT], name="X")
-            X_image = tf.reshape(X, [-1, IMG_HEIGHT, IMG_WIDTH, NUM_CHANNELS])
+            X_image = tf.reshape(X, [-1, IMG_WIDTH, IMG_HEIGHT, NUM_CHANNELS])
             Y = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="Y")
             Y_true_class = tf.argmax(Y, axis=1, name="Y_true_class")
             # Pass images to tensorboard for visualization (only 3 images)

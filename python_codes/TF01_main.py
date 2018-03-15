@@ -40,11 +40,11 @@ LOG_FOLDER = '../tensorflow_logs/TF01'
 
 # ===== Define global variables =====
 # Image related
-IMG_HEIGHT = 28
 IMG_WIDTH = 28
+IMG_HEIGHT = 28
 # total number of pixels in an image
-IMG_TOT = IMG_HEIGHT * IMG_WIDTH
-IMG_SHAPE = (IMG_HEIGHT, IMG_WIDTH)
+IMG_TOT = IMG_WIDTH * IMG_HEIGHT
+IMG_SHAPE = (IMG_WIDTH, IMG_HEIGHT)
 # number of classes
 NUM_CLASSES = 10
 # labels corresponding to the numbers
