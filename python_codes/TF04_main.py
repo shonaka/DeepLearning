@@ -19,20 +19,24 @@
 
     **********************************************************************************
     Author:     Sho Nakagome
-    Date:       3/11/18
+    Date:       3/15/18
     File:       TF04_main
-    Comments:   This is the main file to run a ResNet model on classifing plant seedlings.
+    Comments:   This is the main file to run a CNN model on classifing plant seedlings.
+                Main intension is to explain how to use tf.data.Dataset and tf.estimator APIs.
+    Reference:  https://github.com/tensorflow/tensorflow/blob/r1.5/tensorflow/examples/tutorials/layers/cnn_mnist.py
     ToDo:       * Quantify the results
                 * Explore more and provide more insights in the data
     **********************************************************************************
 """
 import tensorflow as tf
+import tflearn
 import numpy as np
 import pandas as pd
 from subprocess import check_output
-from cnn_ops import *
+
 # For Pycharm IDE, avoiding a certain warning when using GPU computing
 import os
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Specify data path
@@ -41,34 +45,37 @@ LOG_FOLDER = '../tensorflow_logs/TF04'
 TRAIN_PATH = '../data/plant_seedlings_classification/train'
 # Specify test path
 TEST_PATH = '../data/plant_seedlings_classification/test'
+# Specify model directory
+MODEL_PATH = '../models/TF04'
 
 # ===== Define global variables =====
+# Whether to delete previous model or not
+# If you want to train from the beginning, just make this True
+DELETE_MODEL = True
+
 # Image related (resizing image dimensions)
-IMG_WIDTH = 32
-IMG_HEIGHT = 32
+IMG_WIDTH = 64
+IMG_HEIGHT = 64
 
 # Number of classes
 NUM_CLASS = 12
 
 # Optimization related
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 BATCH_SIZE = 64
-NUM_EPOCHS = 10
+NUM_EPOCHS = 500
 
 # Visualization related
 DISPLAY_FREQ = BATCH_SIZE
 
-# CNN related
+# Model related
 # Number of channels
-NUM_CHANNELS = 3  # Since we are using gray-scale
-# 1st CNN layer info
-FILTER_SIZE1 = 5
-NUM_FILTERS1 = 20
-# 2nd CNN layer info
-FILTER_SIZE2 = 10
-NUM_FILTERS2 = 20
+NUM_CHANNELS = 3
+# Which optimizer to use
+OPTIMIZER = "sgd"
 # ===================================
 
+# Helper functions (Importing preprocessing data)
 def input_parser(img_path, label):
     # convert the label to one-hot encoding
     one_hot = tf.one_hot(label, NUM_CLASS)
@@ -76,7 +83,7 @@ def input_parser(img_path, label):
     # read the image from file
     img_file = tf.read_file(img_path)
 
-    # there's decode_png and decode_jpeg but this one is more robust
+    # there's other methods: decode_png, decode_jpeg etc. but this one is more robust.
     # one downside is that you need the next line to assign shape
     img_decoded = tf.image.decode_image(img_file, channels=NUM_CHANNELS)
 
@@ -88,19 +95,74 @@ def input_parser(img_path, label):
 
     return img_resized, one_hot
 
+
 def train_preprocess(image, label):
+    # randomly flip an image horizontally
     image = tf.image.random_flip_left_right(image)
 
+    # adjust the brightness by a random factor
     image = tf.image.random_brightness(image, max_delta=32.0 / 255.0)
+
+    # adjust the saturation of an RGB image by a random factor
     image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
 
-    # Make sure the image is still in [0, 1]
+    # linearly scales image to have zero mean and unit norm
+    image = tf.image.per_image_standardization(image)
+
+    # clip tensor values to a specified min and max
     image = tf.clip_by_value(image, 0.0, 1.0)
 
     return image, label
 
-def main():
 
+def imgs_input_fn(filenames, filelabels, batch_size, do_shuffle=True):
+    dataset = tf.data.Dataset.from_tensor_slices((filenames, filelabels))
+    # only for training, not for testing
+    if do_shuffle:
+        dataset = dataset.shuffle(len(filenames))
+    dataset = dataset.map(input_parser, num_parallel_calls=32)
+    dataset = dataset.map(train_preprocess, num_parallel_calls=32)
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.prefetch(1)
+
+    return dataset
+
+
+def custom_conv(net, num_filter, kernel_size):
+    net = tflearn.conv_2d(net, num_filter, kernel_size)
+    net = tflearn.batch_normalization(net)
+
+    return net
+
+
+def simpleCNN(optimizer):
+    net = tflearn.input_data(shape=[None, IMG_WIDTH, IMG_HEIGHT, 3])
+    net = custom_conv(net, 32, 3)
+    net = tflearn.max_pool_2d(net, 3, strides=2)
+    net = custom_conv(net, 64, 3)
+    net = custom_conv(net, 64, 3)
+    net = tflearn.max_pool_2d(net, 3, strides=2)
+    net = custom_conv(net, 128, 3)
+    net = custom_conv(net, 128, 3)
+    net = tflearn.max_pool_2d(net, 3, strides=2)
+    net = custom_conv(net, 256, 3)
+    net = custom_conv(net, 256, 3)
+    net = custom_conv(net, 256, 3)
+    net = tflearn.fully_connected(net, 1024, activation="relu")
+
+    # Regression
+    net = tflearn.fully_connected(net, NUM_CLASS, activation='softmax')
+    net = tflearn.regression(net, optimizer=optimizer,
+                             loss='categorical_crossentropy')
+
+    # Training
+    model = tflearn.DNN(net, tensorboard_verbose=3,
+                        tensorboard_dir=LOG_FOLDER)
+
+    return model
+
+
+def main(unused_argv):
     # # Show the current version of tensorflow
     print("Tensorflow version: ", tf.__version__)
 
@@ -112,12 +174,13 @@ def main():
     labels = {classes[i]: i for i in range(0, len(classes))}
     inv_labels = {val: key for key, val in labels.items()}
 
-    # Create a list of filenames per classes in subfolder
+    # Create a list of filenames per class in subfolder
     train_list = []
     for c in classes:
         files = check_output(["ls", TRAIN_PATH + '/%s' % c]).decode("utf8").strip().split("\n")
         train_list.append(files)
 
+    # Run through the directory and subfolders to get all the images and labels
     filenames = []
     filelabels = []
     for c, files in zip(classes, train_list):
@@ -125,130 +188,89 @@ def main():
             filelabels.append(labels[c])
             filenames.append(TRAIN_PATH + '/' + c + '/' + file)
 
+    # Get images and labels from test set too
+    test_list = os.listdir(TEST_PATH)
+    test_images = []
+    names = []
+    for image in test_list:
+        names.append(image)
+        test_images.append(TEST_PATH + '/' + image)
+
+    # just give dammy labels for test set now
+    test_labels = np.zeros([len(test_images)]).astype(int)
+
     print("\nFinished loading data info.\n")
+    print("-------------------------------")
 
     # Clean the log folder (used to log results in a folder for later tensorboard usage)
     if tf.gfile.Exists(LOG_FOLDER):
+        print("Cleaning the log folder")
         tf.gfile.DeleteRecursively(LOG_FOLDER)
     tf.gfile.MakeDirs(LOG_FOLDER)
 
+    # Clean the model folder
+    if DELETE_MODEL:
+        if tf.gfile.Exists(MODEL_PATH):
+            tf.gfile.DeleteRecursively(MODEL_PATH)
+        tf.gfile.MakeDirs(MODEL_PATH)
 
-    # # 2) Define a graph
-    graph = tf.Graph()
-    with graph.as_default():
-        # Define place holders. These are where your input and output goes when actually computing.
-        with tf.name_scope('Inputs'):
-            X_image = tf.placeholder(tf.float32, shape=[None, IMG_WIDTH, IMG_HEIGHT, NUM_CHANNELS], name="X")
-            Y = tf.placeholder(tf.float32, [None, NUM_CLASS], name="Y")
-            Y_true_class = tf.argmax(Y, axis=1, name="Y_true_class")
-            # Pass images to tensorboard for visualization (only 3 images)
-            tf.summary.image('input_images', X_image, 3)
+    # Make sure that you never call this before creating a model
+    # since it requires that you have defined a graph already.
+    init = tf.global_variables_initializer()
 
-        # Defining a simple CNN model using functions defined before
-        with tf.name_scope('Model'):
-            # shape of the first layer's filter
-            shape1 = [FILTER_SIZE1, FILTER_SIZE1, NUM_CHANNELS, NUM_FILTERS1]
-            # make the first layer
-            conv1 = new_conv(X_image, shape1, 'conv1')
-            # shape of the second layer's filter
-            shape2 = [FILTER_SIZE2, FILTER_SIZE2, NUM_FILTERS1, NUM_FILTERS2]
-            # make the second layer
-            conv2 = new_conv(conv1, shape2, 'conv2')
-            # add to fully-connected layer
-            model = new_fc(conv2, 'output_layer', NUM_CLASS)
-            # Use softmax layer to normalize the output and then get the highest number to determine the class
-            Y_pred = tf.nn.softmax(model)
-            Y_pred_class = tf.argmax(Y_pred, axis=1)
 
-        # Define loss function
-        with tf.name_scope('Loss'):
-            # Using cross entropy to calculate the loss
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=model, labels=Y), name="cross_entropy")
-            # Log loss in tensorboard
-            tf.summary.scalar('loss', loss)
+    with tf.Session() as sess:
+        print("-------------------------------")
+        print("Initializing all the variables.")
+        sess.run(init)
 
-        with tf.name_scope('Optimizer'):
-            # Here we are using the Adam optimizer
-            optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE, name='Adam_optimizer').minimize(loss)
+        # get next element training data
+        dataset = imgs_input_fn(filenames, filelabels, BATCH_SIZE)
 
-        with tf.name_scope('Accuracy'):
-            # Calculating the accuracy by comparing with the true labels
-            correct_prediction = tf.equal(Y_pred_class, Y_true_class)
-            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-            # Log accuracy in tensorboard
-            tf.summary.scalar('accuracy', accuracy)
+        # Create tensorflow iterator object
+        iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
+        next_iterator = iterator.get_next()
 
-        # # 3) Running tensorflow session
-        # Make sure that you never call this before creating a model
-        # since it requires that you have defined a graph already.
-        init = tf.global_variables_initializer()
+        # need to create initializer for both training and testing
+        training_init_op = iterator.make_initializer(dataset)
 
-        # merge all the summaries for tensorboard
-        merged = tf.summary.merge_all()
+        # get actual batch of images and labels
+        sess.run(training_init_op)
+        x_batch, y_batch = sess.run(next_iterator)
 
-        # Running a tensorflow session
-        with tf.Session() as sess:
-            print("-------------------------------")
-            print("Initializing all the variables.")
-            sess.run(init)
-            writer = tf.summary.FileWriter(LOG_FOLDER + "/train", graph)
-            writer_val = tf.summary.FileWriter(LOG_FOLDER + "/validation", graph)
-            # Calculate the number of iterations needed based on your batch size
-            num_iteration = int(len(filenames) / BATCH_SIZE)
-            # Define global step: a way to keep track of your trained samples over multiple epochs
-            global_step = 0
+        # Building Simple CNN Network
+        model = simpleCNN(OPTIMIZER)
 
-            # Create Dataset object in tensorflow
-            dataset = tf.data.Dataset.from_tensor_slices((filenames, filelabels))
-            dataset = dataset.shuffle(len(filenames))
-            dataset = dataset.map(input_parser, num_parallel_calls=4)
-            dataset = dataset.map(train_preprocess, num_parallel_calls=4)
-            dataset = dataset.batch(BATCH_SIZE)
-            dataset = dataset.prefetch(1)
+        # Training
+        print("Start training...")
+        model.fit(x_batch, y_batch, n_epoch=NUM_EPOCHS, validation_set=0.1,
+                  snapshot_epoch=False, snapshot_step=500,
+                  show_metric=True, batch_size=BATCH_SIZE, shuffle=True,
+                  run_id='cnn_plant')
+        print("\nFinished training.\n")
 
-            # Create tensorflow iterator object
-            iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
-            next_element = iterator.get_next()
+        # same for test data
+        test_dataset = \
+            imgs_input_fn(test_images, test_labels, len(names), do_shuffle=False)
+        test_init_op = iterator.make_initializer(test_dataset)
 
-            # create two initialization ops to switch between the datasets
-            training_init_op = iterator.make_initializer(dataset)
+        # do the same for test set, but there's no labels
+        # and want to get all the data for testing
+        sess.run(test_init_op)
+        testX, _ = sess.run(next_iterator)
 
-            print("Start training.")
-            for epoch in range(NUM_EPOCHS):
-                print("Training epochs: {}".format(epoch))
-                for i in range(num_iteration):
-                    # Get a batch of training samples. Every time this is called within a loop,
-                    # it gets the next batch.
-                    global_step += 1
+        # Testing
+        print("Start testing...")
+        prediction = model.predict(testX)
+        test_len = prediction.shape[0]
+        prediction_ind = np.argmax(prediction, axis=-1)
+        predicted_labels = [inv_labels[prediction_ind[i]] for i in range(test_len)]
 
-                    sess.run(training_init_op)
-
-                    # Run the optimization with tensorboard summary
-                    x_batch, y_batch = sess.run(next_element)
-                    feed_dict_train = {X_image: x_batch, Y: y_batch}
-                    _, train_summary = sess.run([optimizer, merged], feed_dict=feed_dict_train)
-
-                    # Show loss and accuracy with a certain display frequency
-                    if i % DISPLAY_FREQ == 0:
-                        train_batch_loss, train_batch_acc = sess.run([loss, accuracy], feed_dict=feed_dict_train)
-                        print("iter {0:3d}:\t Loss={1:.2f},\tTraining accuracy=\t{2:.01%}".format(i,
-                                                                                                  train_batch_loss,
-                                                                                                  train_batch_acc))
-                    # log results
-                    writer.add_summary(train_summary, global_step)
-
-                # Just for better visualization on logs
-                print("------------------------------")
-
-            print("Training finished.")
-            print("------------------")
-
-            # Close tensorflow session
-            sess.close()
-
-    print("\nFinished training.\n")
+        df = pd.DataFrame(data={'file': names, 'species': predicted_labels})
+        df.to_csv('../Results/plant_seedlings_results.csv', index=False)
 
 
 # Just to make sure you start running from the main function
 if __name__ == '__main__':
-    main()
+    # main()
+    tf.app.run()
