@@ -39,6 +39,14 @@ import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+# Folder structure
+# - data
+#   - plant_seedlings_classification
+#       - train
+#       - test
+# - python_codes
+#   - TF04_main.py
+
 # Specify data path
 LOG_FOLDER = '../tensorflow_logs/TF04'
 # Specify training path
@@ -61,9 +69,9 @@ IMG_HEIGHT = 64
 NUM_CLASS = 12
 
 # Optimization related
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-1
 BATCH_SIZE = 64
-NUM_EPOCHS = 500
+NUM_EPOCHS = 50
 
 # Visualization related
 DISPLAY_FREQ = BATCH_SIZE
@@ -100,6 +108,9 @@ def train_preprocess(image, label):
     # randomly flip an image horizontally
     image = tf.image.random_flip_left_right(image)
 
+    # randomly flip an image vertically
+    image = tf.image.random_flip_up_down(image)
+
     # adjust the brightness by a random factor
     image = tf.image.random_brightness(image, max_delta=32.0 / 255.0)
 
@@ -129,7 +140,9 @@ def imgs_input_fn(filenames, filelabels, batch_size, do_shuffle=True):
 
 
 def custom_conv(net, num_filter, kernel_size):
-    net = tflearn.conv_2d(net, num_filter, kernel_size)
+    net = tflearn.conv_2d(net, num_filter, kernel_size,
+                          activation="leaky_relu",
+                          weights_init=tflearn.initializations.xavier())
     net = tflearn.batch_normalization(net)
 
     return net
@@ -137,8 +150,6 @@ def custom_conv(net, num_filter, kernel_size):
 
 def simpleCNN(optimizer):
     net = tflearn.input_data(shape=[None, IMG_WIDTH, IMG_HEIGHT, 3])
-    net = custom_conv(net, 32, 3)
-    net = tflearn.max_pool_2d(net, 3, strides=2)
     net = custom_conv(net, 64, 3)
     net = custom_conv(net, 64, 3)
     net = tflearn.max_pool_2d(net, 3, strides=2)
@@ -148,9 +159,16 @@ def simpleCNN(optimizer):
     net = custom_conv(net, 256, 3)
     net = custom_conv(net, 256, 3)
     net = custom_conv(net, 256, 3)
-    net = tflearn.fully_connected(net, 1024, activation="relu")
+    net = tflearn.max_pool_2d(net, 3, strides=2)
+
+    net = tflearn.flatten(net)
+    net = tflearn.dropout(net, 0.8)
+    net = tflearn.batch_normalization(net)
+    net = tflearn.fully_connected(net, 1024, activation="tanh")
 
     # Regression
+    net = tflearn.dropout(net, 0.8)
+    net = tflearn.batch_normalization(net)
     net = tflearn.fully_connected(net, NUM_CLASS, activation='softmax')
     net = tflearn.regression(net, optimizer=optimizer,
                              loss='categorical_crossentropy')
@@ -267,6 +285,7 @@ def main(unused_argv):
         predicted_labels = [inv_labels[prediction_ind[i]] for i in range(test_len)]
 
         df = pd.DataFrame(data={'file': names, 'species': predicted_labels})
+        df = df.sort_values(by=['file'])
         df.to_csv('../Results/plant_seedlings_results.csv', index=False)
 
 
